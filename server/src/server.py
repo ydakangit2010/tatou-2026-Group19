@@ -670,6 +670,7 @@ def create_app():
     @app.post("/api/load-plugin")
     @require_auth
     def load_plugin():
+        return jsonify({"error": "plugin loading is disabled"}), 403
         """
         Load a serialized Python class implementing WatermarkingMethod from
         STORAGE_DIR/files/plugins/<filename>.{pkl|dill} and register it in wm_mod.METHODS.
