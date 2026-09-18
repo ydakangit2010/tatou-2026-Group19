@@ -561,9 +561,9 @@ def create_app():
                         SELECT id, name, path
                         FROM Documents
                         WHERE id = :id
-                        LIMIT 1
+                            WHERE id = :id AND ownerid = :uid
                     """),
-                    {"id": doc_id},
+                    {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
         except Exception as e:
             return jsonify({"error": f"database error: {str(e)}"}), 503
