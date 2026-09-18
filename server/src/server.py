@@ -688,6 +688,8 @@ def create_app():
         try:
             plugins_dir.mkdir(parents=True, exist_ok=True)
             plugin_path = plugins_dir / filename
+            plugin_path = plugin_path.resolve()
+            plugin_path.relative_to(plugins_dir.resolve())
         except Exception as e:
             return jsonify({"error": f"plugin path error: {e}"}), 500
 
