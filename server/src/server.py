@@ -22,6 +22,7 @@ except Exception:  # dill is optional
 
 import watermarking_utils as WMUtils
 from watermarking_method import WatermarkingMethod
+from rmap import RMAPServer, RMAPError
 #from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
 def create_app():
@@ -37,6 +38,11 @@ def create_app():
     app.config["DB_HOST"] = os.environ.get("DB_HOST", "db")
     app.config["DB_PORT"] = int(os.environ.get("DB_PORT", "3306"))
     app.config["DB_NAME"] = os.environ.get("DB_NAME", "tatou")
+    app.config["RMAP_SERVER_PUBLIC_KEY"] = os.environ.get("RMAP_SERVER_PUBLIC_KEY")
+    app.config["RMAP_SERVER_PRIVATE_KEY"] = os.environ.get("RMAP_SERVER_PRIVATE_KEY")
+    app.config["RMAP_CLIENT_KEYS_DIR"] = os.environ.get("RMAP_CLIENT_KEYS_DIR")
+    app.config["RMAP_SOURCE_PDF"] = os.environ.get("RMAP_SOURCE_PDF")
+    app.config["RMAP_SERVER_KEY_PASSPHRASE"] = os.environ.get("RMAP_SERVER_KEY_PASSPHRASE")
 
     app.config["STORAGE_DIR"].mkdir(parents=True, exist_ok=True)
 
@@ -53,6 +59,28 @@ def create_app():
             eng = create_engine(db_url(), pool_pre_ping=True, future=True)
             app.config["_ENGINE"] = eng
         return eng
+
+    def get_rmap_server():
+        srv = app.config.get("_RMAP_SERVER")
+        if srv is not None:
+            return srv
+
+        public_key = app.config.get("RMAP_SERVER_PUBLIC_KEY")
+        private_key = app.config.get("RMAP_SERVER_PRIVATE_KEY")
+        clients_dir = app.config.get("RMAP_CLIENT_KEYS_DIR")
+
+        if not public_key or not private_key or not clients_dir:
+            raise RuntimeError("RMAP key configuration is missing")
+
+        srv = RMAPServer(
+            public_key,
+            private_key,
+            passphrase=app.config.get("RMAP_SERVER_KEY_PASSPHRASE")
+        )
+        srv.loadIdentities(clients_dir)
+
+        app.config["_RMAP_SERVER"] = srv
+        return srv
 
     # --- Helpers ---
     def _serializer():
@@ -104,6 +132,134 @@ def create_app():
         except Exception:
             db_ok = False
         return jsonify({"message": "The server is up and running.", "db_connected": db_ok}), 200
+
+    # POST /api/rmap-initiate
+    @app.post("/api/rmap-initiate")
+    def rmap_initiate():
+        msg1 = request.get_json(silent=True)
+        if not isinstance(msg1, dict) or "payload" not in msg1:
+            return jsonify({"error": "payload is required"}), 400
+
+        try:
+            srv = get_rmap_server()
+            _identity, response1 = srv.receiveMsg1(msg1)
+            return jsonify(response1), 200
+        except RMAPError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            app.logger.exception("RMAP initiate failed")
+            return jsonify({"error": f"RMAP server error: {str(e)}"}), 500
+
+    # POST /api/rmap-get-link
+    @app.post("/api/rmap-get-link")
+    def rmap_get_link():
+        msg2 = request.get_json(silent=True)
+        if not isinstance(msg2, dict) or "payload" not in msg2:
+            return jsonify({"error": "payload is required"}), 400
+
+        try:
+            srv = get_rmap_server()
+            identity, expected_link, response2 = srv.receiveMsg2(msg2)
+
+            if (
+                not isinstance(expected_link, str)
+                or len(expected_link) != 32
+                or any(c not in "0123456789abcdefABCDEF" for c in expected_link)
+            ):
+                raise RuntimeError("RMAP produced an invalid link")
+
+            # Locate the registered confidential Group 19 PDF.
+            with get_engine().connect() as conn:
+                document = conn.execute(
+                    text("""
+                        SELECT d.id, d.name, d.path
+                        FROM Documents d
+                        JOIN Users u ON u.id = d.ownerid
+                        WHERE u.login = :login
+                          AND d.name = :name
+                        LIMIT 1
+                    """),
+                    {
+                        "login": "rmap_group19",
+                        "name": "Group_19.pdf",
+                    },
+                ).first()
+
+            if not document:
+                raise RuntimeError("RMAP source document is not registered")
+
+            source_path = Path(document.path).resolve()
+            storage_root = Path(app.config["STORAGE_DIR"]).resolve()
+
+            try:
+                source_path.relative_to(storage_root)
+            except ValueError:
+                raise RuntimeError("RMAP source document path is invalid")
+
+            if not source_path.exists():
+                raise RuntimeError("RMAP source document is missing")
+
+            method = "toy-eof"
+            intended_for = str(identity)
+            secret = intended_for
+            key = expected_link
+
+            wm_bytes = WMUtils.apply_watermark(
+                pdf=str(source_path),
+                secret=secret,
+                key=key,
+                method=method,
+                position=None,
+            )
+
+            if not isinstance(wm_bytes, (bytes, bytearray)) or not wm_bytes:
+                raise RuntimeError("RMAP watermarking produced no output")
+
+            intended_slug = secure_filename(intended_for) or "client"
+            dest_dir = storage_root / "rmap" / "watermarks"
+            dest_dir.mkdir(parents=True, exist_ok=True)
+
+            candidate = f"Group_19__{intended_slug}__{expected_link}.pdf"
+            dest_path = (dest_dir / candidate).resolve()
+
+            try:
+                dest_path.relative_to(storage_root)
+            except ValueError:
+                raise RuntimeError("RMAP destination path is invalid")
+
+            with dest_path.open("wb") as f:
+                f.write(wm_bytes)
+
+            try:
+                with get_engine().begin() as conn:
+                    conn.execute(
+                        text("""
+                            INSERT INTO Versions
+                            (documentid, link, intended_for, secret, method, position, path)
+                            VALUES
+                            (:documentid, :link, :intended_for, :secret, :method, :position, :path)
+                        """),
+                        {
+                            "documentid": int(document.id),
+                            "link": expected_link,
+                            "intended_for": intended_for,
+                            "secret": secret,
+                            "method": method,
+                            "position": "",
+                            "path": str(dest_path),
+                        },
+                    )
+            except Exception:
+                dest_path.unlink(missing_ok=True)
+                raise
+
+            return jsonify(response2), 200
+
+        except RMAPError as e:
+            return jsonify({"error": str(e)}), 400
+        except Exception as e:
+            app.logger.exception("RMAP get-link failed")
+            return jsonify({"error": f"RMAP server error: {str(e)}"}), 500
 
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
@@ -562,7 +718,6 @@ def create_app():
                     text("""
                         SELECT id, name, path
                         FROM Documents
-                        WHERE id = :id
                             WHERE id = :id AND ownerid = :uid
                     """),
                     {"id": doc_id, "uid": int(g.user["id"])},

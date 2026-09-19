@@ -12,6 +12,7 @@ services:
       - ${HOME}/server_pub.asc:/run/secrets/rmap/server_pub.asc:ro
       - ${HOME}/server_priv.asc:/run/secrets/rmap/server_priv.asc:ro
       - ${HOME}/rmap_client_keys:/run/secrets/rmap/clients:ro
+      - ${HOME}/Group_19.pdf:/run/secrets/rmap/Group_19.pdf:ro
     environment:
       - PYTHONUNBUFFERED=1
       # DB connection details for future use by the API
@@ -25,6 +26,8 @@ services:
       - RMAP_SERVER_PUBLIC_KEY=/run/secrets/rmap/server_pub.asc
       - RMAP_SERVER_PRIVATE_KEY=/run/secrets/rmap/server_priv.asc
       - RMAP_CLIENT_KEYS_DIR=/run/secrets/rmap/clients
+      - RMAP_SOURCE_PDF=/run/secrets/rmap/Group_19.pdf
+      - RMAP_SERVER_KEY_PASSPHRASE=${RMAP_SERVER_KEY_PASSPHRASE}
     depends_on:
       db:
         condition: service_healthy
