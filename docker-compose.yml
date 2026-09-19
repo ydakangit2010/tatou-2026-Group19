@@ -9,6 +9,9 @@ services:
       - "5000:5000"
     volumes:
       - user-files:/app/storage
+      - ${HOME}/server_pub.asc:/run/secrets/rmap/server_pub.asc:ro
+      - ${HOME}/server_priv.asc:/run/secrets/rmap/server_priv.asc:ro
+      - ${HOME}/rmap_client_keys:/run/secrets/rmap/clients:ro
     environment:
       - PYTHONUNBUFFERED=1
       # DB connection details for future use by the API
@@ -19,6 +22,9 @@ services:
       - DB_PASSWORD=${MARIADB_PASSWORD}
       - FLAG_2=${FLAG_2}
       - SECRET_KEY=${SECRET_KEY}
+      - RMAP_SERVER_PUBLIC_KEY=/run/secrets/rmap/server_pub.asc
+      - RMAP_SERVER_PRIVATE_KEY=/run/secrets/rmap/server_priv.asc
+      - RMAP_CLIENT_KEYS_DIR=/run/secrets/rmap/clients
     depends_on:
       db:
         condition: service_healthy
