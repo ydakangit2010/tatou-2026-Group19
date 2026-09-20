@@ -88,3 +88,37 @@ We confirmed that:
 
 ### Result
 The Flag 2 file is now better protected inside the container. The container still runs as root, so moving the application to a non-root user remains a possible future hardening improvement.
+
+
+
+## 2026-09-20 – Third flag_2 capture
+
+### What happened
+The teacher informed Group 19 that our flag_2 had been captured again by another group.
+
+### Investigation
+We checked the security fixes that were already added earlier.
+
+- /api/load-plugin is still disabled.
+- The old bash-bridge-eof command injection is still fixed.
+- No shell=True was found in the running application code.
+- The document queries use parameterized SQL.
+- We found that the Tatou server was still running as root inside the container.
+
+We cannot confirm exactly how the other group captured the flag, but running the server as root was still a security risk. If an attacker found another code execution vulnerability, they could potentially read /app/flag.
+
+### Actions taken
+- Replaced flag_2 with the new value provided by the teacher.
+- Created a separate non-root user for the Tatou application.
+- Changed Gunicorn so it now runs as the non-root user instead of root.
+- Kept /app/flag owned by root with permission 600.
+- Gave the application user permission to write to /app/storage.
+- Verified that the application user cannot read /app/flag.
+- Verified that uploads still work.
+- Verified that the RMAP files are still accessible.
+- Verified that /api/load-plugin still returns HTTP 403.
+- Ran the tests successfully.
+- Checked that /healthz still works.
+
+### Result
+The Tatou server is now running as a non-root user. This reduces the risk that a future application vulnerability can be used to read /app/flag.
