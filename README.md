@@ -54,5 +54,25 @@ http -v :5000/healthz
 # Open your browser at 127.0.0.1:5000 to check if the website is up.
 ```
 
+## My watermarking method: ak-metadata
 
+I created a watermarking method called ak-metadata.
+
+It stores the watermark in the PDF metadata, inside the keywords field. The secret is Base64 encoded and protected with HMAC-SHA256 using the key.
+
+The method:
+- can add a watermark to a PDF
+- can read the secret again with the correct key
+- rejects a wrong key
+- keeps the existing PDF metadata
+- does not use the position value
+- works with valid PDFs that have at least one page
+
+Implementation:
+
+server/src/ak_metadata_watermark.py
+
+Tests:
+
+server/test/test_ak_metadata_watermark.py
 
