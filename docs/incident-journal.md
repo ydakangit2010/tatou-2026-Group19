@@ -62,3 +62,29 @@ We cannot confirm that this was the exact method used by the other group, but it
 The plugin-loading security issue has been fixed. The replacement flag_2 provided by the teacher is still in use.
 
 If flag_2 is captured again, we will continue investigating other possible ways to access the server container.
+
+
+
+## 2026-09-20 – Additional container hardening
+
+### What happened
+During a follow-up security review, we checked which services were exposed on the VM and how sensitive files were protected inside the server container.
+
+### Investigation
+We confirmed that:
+- MariaDB is not exposed externally.
+- phpMyAdmin is only bound to localhost.
+- the Tatou server is exposed on port 5000 as expected.
+- the server container still runs as root.
+- /app/flag was readable by other users inside the container, while the RMAP private key already had restricted permissions.
+
+### Actions taken
+- Removed the obsolete Docker Compose version field.
+- Added chmod 600 /app/flag after Flag 2 is initialized by the entrypoint script.
+- Rebuilt and restarted the server container.
+- Confirmed that /app/flag now has owner-only read/write permissions.
+- Verified that the Tatou health check still works.
+- Committed, pushed, and merged the hardening change into main.
+
+### Result
+The Flag 2 file is now better protected inside the container. The container still runs as root, so moving the application to a non-root user remains a possible future hardening improvement.
