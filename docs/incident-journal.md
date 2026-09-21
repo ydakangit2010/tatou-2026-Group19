@@ -6,22 +6,22 @@
 Group 19 was informed by the teacher that flag_2 had been captured by another group.
 
 ### Investigation
-During the investigation, we found that the server startup logs were printing the actual value of FLAG_2.
+During the investigation, we found that the server startup logs were exposing sensitive information.
 
-We also found a possible command injection vulnerability in the bash-bridge-eof watermarking method. The secret value from the API request was passed into a shell command using subprocess.run(..., shell=True). Since this code runs inside the application container, it could potentially allow an attacker to execute commands inside the container and access files such as `/app/flag`.
+We also found unsafe shell command handling in one of the watermarking methods. Because the method handled user-controlled input, this could potentially be abused inside the application container.
 
-We cannot confirm which exact method was used by the attacking group, but this vulnerability was considered a likely cause of the compromise.
+We could not confirm that this was the exact method used by the attacking group, but it was an important security issue.
 
 ### Actions taken
-- Rotated flag_2 using the new value provided by the teacher.
-- Removed the actual FLAG_2 value from the server startup logs.
-- Replaced the shell-based implementation in bash-bridge-eof with Python byte operations.
+- Replaced flag_2 with the new value provided by the teacher.
+- Removed sensitive information from the startup logs.
+- Replaced the unsafe shell-based watermarking code with normal Python processing.
 - Rebuilt the Tatou service.
-- Verified that the healthz endpoint was working.
+- Verified that the health endpoint was working.
 - Ran the watermarking tests successfully.
 
 ### Result
-The service was restored successfully and the identified vulnerabilities were fixed.
+The identified problems were fixed and the service continued to work normally.
 
 
 
@@ -29,39 +29,23 @@ The service was restored successfully and the identified vulnerabilities were fi
 ## 2026-09-18 – Follow-up investigation of flag_2 capture
 
 ### What happened
-After the previous flag_2 incident, we continued checking the server to understand how another group might have been able to access the flag.
+After the previous flag_2 incident, we continued reviewing the Tatou server for possible security problems.
 
 ### Investigation
-While reviewing server.py, we found a security problem in the /api/load-plugin endpoint.
+We found a security issue in the plugin-loading functionality that could allow unsafe access inside the application container.
 
-The endpoint allowed an authenticated user to provide a filename for a plugin. The path was not properly checked, so it could potentially allow access to files outside the intended plugin folder.
-
-We also found that the endpoint used Python pickle/dill to load .pkl files. This is risky because a malicious pickle file can execute Python code when it is loaded.
-
-We also checked the running container and found that:
-
-- the server container was running as root;
-- flag_2 is stored inside the container at app/flag;
-- the flag file could be read by processes running inside the container;
-- pkl files existed in the shared storage.
-
-Because of this, the plugin-loading functionality could potentially give an attacker a way to execute code inside the container and access flag_2.
-
-We cannot confirm that this was the exact method used by the other group, but it was a serious security issue and needed to be fixed.
+We could not confirm whether this was the exact method used by the attacking group, but the issue was serious enough to fix.
 
 ### Actions taken
-- Added a check so plugin file paths cannot escape the intended plugin directory.
-- Disabled the /api/load-plugin endpoint because it was not needed and unsafe pickle loading could lead to code execution.
-- Rebuilt and restarted the server container.
-- Checked that the /healthz endpoint was working and the database connection was healthy.
-- Tested /api/load-plugin with a valid logged-in user and confirmed that it now returns HTTP 403 with plugin loading is disabled.
-- Ran the existing automated tests successfully (7 passed).
-- Pushed the security fixes to the main branch.
+- Added additional validation around plugin handling.
+- Disabled the plugin-loading endpoint because it was not required.
+- Rebuilt and restarted the server.
+- Verified that the endpoint is no longer available.
+- Ran the automated tests successfully.
+- Pushed the security changes to the main branch.
 
 ### Result
-The plugin-loading security issue has been fixed. The replacement flag_2 provided by the teacher is still in use.
-
-If flag_2 is captured again, we will continue investigating other possible ways to access the server container.
+The identified plugin-loading issue was fixed and the service continued to work normally.
 
 
 
@@ -97,28 +81,36 @@ The Flag 2 file is now better protected inside the container. The container stil
 The teacher informed Group 19 that our flag_2 had been captured again by another group.
 
 ### Investigation
-We checked the security fixes that were already added earlier.
+We checked the security fixes that had already been added and continued reviewing the container configuration.
 
-- /api/load-plugin is still disabled.
-- The old bash-bridge-eof command injection is still fixed.
-- No shell=True was found in the running application code.
-- The document queries use parameterized SQL.
-- We found that the Tatou server was still running as root inside the container.
-
-We cannot confirm exactly how the other group captured the flag, but running the server as root was still a security risk. If an attacker found another code execution vulnerability, they could potentially read /app/flag.
+We found that the application was still running with more privileges than necessary. We could not confirm exactly how the other group captured the flag, but this was an important security weakness.
 
 ### Actions taken
 - Replaced flag_2 with the new value provided by the teacher.
-- Created a separate non-root user for the Tatou application.
-- Changed Gunicorn so it now runs as the non-root user instead of root.
-- Kept /app/flag owned by root with permission 600.
-- Gave the application user permission to write to /app/storage.
-- Verified that the application user cannot read /app/flag.
-- Verified that uploads still work.
-- Verified that the RMAP files are still accessible.
-- Verified that /api/load-plugin still returns HTTP 403.
+- Changed the Tatou application to run as a non-root user.
+- Kept sensitive files protected from the application user.
+- Verified that uploads and RMAP still work.
+- Verified that the disabled plugin endpoint remains blocked.
 - Ran the tests successfully.
-- Checked that /healthz still works.
+- Checked that the health endpoint still works.
 
 ### Result
-The Tatou server is now running as a non-root user. This reduces the risk that a future application vulnerability can be used to read /app/flag.
+The Tatou application now runs with reduced privileges, which limits the impact of future application vulnerabilities.
+
+
+
+## 2026-09-20 – Offensive flag capture
+
+As part of the Phase I offensive task, Group 19 tested other Tatou instances in the SOFTSEC lab environment.
+
+We successfully captured Flag 2 from two other groups.
+
+The issue was related to unsafe plugin loading and deserialization, which allowed access to information inside the application container.
+
+The actual flag values and detailed attack steps are not stored in this repository.
+
+Both captured flags were reported to the teacher using the required subject
+
+This exercise also helped us identify security improvements that we applied to our own Tatou server.
+
+
