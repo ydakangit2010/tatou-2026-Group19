@@ -48,30 +48,32 @@ We could not confirm whether this was the exact method used by the attacking gro
 The identified plugin-loading issue was fixed and the service continued to work normally.
 
 
-
 ## 2026-09-20 – Additional container hardening
 
 ### What happened
-During a follow-up security review, we checked which services were exposed on the VM and how sensitive files were protected inside the server container.
+During a follow-up security review, we checked the container setup, exposed services, and how sensitive files were protected.
 
 ### Investigation
 We confirmed that:
-- MariaDB is not exposed externally.
-- phpMyAdmin is only bound to localhost.
-- the Tatou server is exposed on port 5000 as expected.
-- the server container still runs as root.
-- /app/flag was readable by other users inside the container, while the RMAP private key already had restricted permissions.
+
+- MariaDB was not exposed externally.
+- phpMyAdmin was only available on localhost.
+- the Tatou web service was exposed on its expected application port.
+- the application container was still running with root privileges.
+- some sensitive files inside the container had permissions that were broader than necessary.
 
 ### Actions taken
-- Removed the obsolete Docker Compose version field.
-- Added chmod 600 /app/flag after Flag 2 is initialized by the entrypoint script.
-- Rebuilt and restarted the server container.
-- Confirmed that /app/flag now has owner-only read/write permissions.
-- Verified that the Tatou health check still works.
-- Committed, pushed, and merged the hardening change into main.
+- Reviewed the Docker Compose configuration and removed an obsolete setting.
+- Restricted permissions on sensitive files inside the application container.
+- Kept internal services such as the database and phpMyAdmin from being publicly exposed.
+- Rebuilt and restarted the containers.
+- Verified that the Tatou health check still worked correctly.
+- Committed and pushed the hardening changes to the main branch.
 
 ### Result
-The Flag 2 file is now better protected inside the container. The container still runs as root, so moving the application to a non-root user remains a possible future hardening improvement.
+The container configuration was improved and sensitive files received more restrictive access controls.
+
+The application was still running as root at this stage, so reducing the privileges of the application process was identified as the next hardening step.
 
 
 
