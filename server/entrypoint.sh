@@ -22,5 +22,9 @@ fi
 echo "Preparing application storage..."
 chown -R appuser:appuser /app/storage
 
+# FLAG_2 is only needed during startup to initialize /app/flag.
+# Do not pass it to the application process.
+unset FLAG_2
+
 echo "Starting server as appuser..."
 exec gosu appuser gunicorn -b 0.0.0.0:5000 server:app

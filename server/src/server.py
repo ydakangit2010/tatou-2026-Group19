@@ -30,7 +30,10 @@ def create_app():
     app = Flask(__name__)
 
     # --- Config ---
-    app.config["SECRET_KEY"] = os.environ.get("SECRET_KEY", "dev-secret-change-me")
+    secret_key = os.environ.get("SECRET_KEY")
+    if not secret_key:
+        raise RuntimeError("SECRET_KEY is required")
+    app.config["SECRET_KEY"] = secret_key
     app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
 
@@ -147,9 +150,9 @@ def create_app():
             return jsonify(response1), 200
         except RMAPError as e:
             return jsonify({"error": str(e)}), 400
-        except Exception as e:
+        except Exception:
             app.logger.exception("RMAP initiate failed")
-            return jsonify({"error": f"RMAP server error: {str(e)}"}), 500
+            return jsonify({"error": "RMAP server error"}), 500
 
     # POST /api/rmap-get-link
     @app.post("/api/rmap-get-link")
@@ -258,9 +261,9 @@ def create_app():
 
         except RMAPError as e:
             return jsonify({"error": str(e)}), 400
-        except Exception as e:
+        except Exception:
             app.logger.exception("RMAP get-link failed")
-            return jsonify({"error": f"RMAP server error: {str(e)}"}), 500
+            return jsonify({"error": "RMAP server error"}), 500
 
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
@@ -287,8 +290,9 @@ def create_app():
                 ).one()
         except IntegrityError:
             return jsonify({"error": "email or login already exists"}), 409
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error during user creation")
+            return jsonify({"error": "database error"}), 503
 
         return jsonify({"id": row.id, "email": row.email, "login": row.login}), 201
 
@@ -307,8 +311,9 @@ def create_app():
                     text("SELECT id, email, login, hpassword FROM Users WHERE email = :email LIMIT 1"),
                     {"email": email},
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error during login")
+            return jsonify({"error": "database error"}), 503
 
         if not row or not check_password_hash(row.hpassword, password):
             return jsonify({"error": "invalid credentials"}), 401
@@ -366,8 +371,9 @@ def create_app():
                     """),
                     {"id": did},
                 ).one()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error during document upload")
+            return jsonify({"error": "database error"}), 503
 
         return jsonify({
             "id": int(row.id),
@@ -392,8 +398,9 @@ def create_app():
                     """),
                     {"uid": int(g.user["id"])},
                 ).all()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while listing documents")
+            return jsonify({"error": "database error"}), 503
 
         docs = [{
             "id": int(r.id),
@@ -431,8 +438,9 @@ def create_app():
                     """),
                     {"glogin": str(g.user["login"]), "did": document_id},
                 ).all()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while listing versions")
+            return jsonify({"error": "database error"}), 503
 
         versions = [{
             "id": int(r.id),
@@ -461,8 +469,9 @@ def create_app():
                     """),
                     {"glogin": str(g.user["login"])},
                 ).all()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while listing versions")
+            return jsonify({"error": "database error"}), 503
 
         versions = [{
             "id": int(r.id),
@@ -498,8 +507,9 @@ def create_app():
                     """),
                     {"id": document_id, "uid": int(g.user["id"])},
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while getting documents")
+            return jsonify({"error": "database error"}), 503
 
         # Don’t leak whether a doc exists for another user
         if not row:
@@ -549,8 +559,9 @@ def create_app():
                     """),
                     {"link": link},
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while getting version")
+            return jsonify({"error": "database error"}), 503
 
         # Don’t leak whether a doc exists for another user
         if not row:
@@ -603,6 +614,7 @@ def create_app():
     # DELETE /api/delete-document  (and variants)
     @app.route("/api/delete-document", methods=["DELETE", "POST"])  # POST supported for convenience
     @app.route("/api/delete-document/<document_id>", methods=["DELETE"])
+    @require_auth
     def delete_document(document_id: int | None = None):
         # accept id from path, query (?id= / ?documentid=), or JSON body on POST
         if not document_id:
@@ -632,8 +644,9 @@ def create_app():
                         "uid": int(g.user["id"])
                     },
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while looking up document for deletion")
+            return jsonify({"error": "database error"}), 503
 
         if not row:
             # Don’t reveal others’ docs—just say not found
@@ -667,8 +680,9 @@ def create_app():
                 # uncomment the next line first:
                 # conn.execute(text("DELETE FROM Version WHERE documentid = :id"), {"id": doc_id})
                 conn.execute(text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id})
-        except Exception as e:
-            return jsonify({"error": f"database error during delete: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error during delete")
+            return jsonify({"error": "database error"}), 503
 
         return jsonify({
             "deleted": True,
@@ -723,8 +737,9 @@ def create_app():
                     """),
                     {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while creating watermark")
+            return jsonify({"error": "database error"}), 503
 
         if not row:
             return jsonify({"error": "document not found"}), 404
@@ -760,7 +775,7 @@ def create_app():
                 pdf=str(file_path),
                 secret=secret,
                 key=key,
-                method=method,
+                method=method,	
                 position=position
             )
             if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
@@ -947,8 +962,9 @@ def create_app():
                     """),
                     {"id": doc_id, "uid": int(g.user["id"])},
                 ).first()
-        except Exception as e:
-            return jsonify({"error": f"database error: {str(e)}"}), 503
+        except Exception:
+            app.logger.exception("Database error while reading watermark")
+            return jsonify({"error": "database error"}), 503
 
         if not row:
             return jsonify({"error": "document not found"}), 404
