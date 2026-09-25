@@ -38,7 +38,7 @@ class JZDotGridWatermark(WatermarkingMethod):
     accepts the result only if the MAC matches.
     """
 
-    name: Final[str] = "JZ Dot Grid Watermark"
+    name: Final[str] = "jz-dotgrid"
 
     _CONTEXT: Final[bytes] = b"tatou:dotgrid:v1:"
     _MAX_SECRET: Final[int] = 64            # bytes of UTF-8
