@@ -1,6 +1,7 @@
 import os
 import io
 import hashlib
+import hmac
 import secrets
 import datetime as dt
 from pathlib import Path
@@ -23,6 +24,8 @@ except Exception:  # dill is optional
 
 import watermarking_utils as WMUtils
 from watermarking_method import WatermarkingMethod
+from jz_watermark import JZDotGridWatermark
+from ak_metadata_watermark import AKMetadataWatermark
 from rmap import RMAPServer, RMAPError
 #from watermarking_utils import METHODS, apply_watermark, read_watermark, explore_pdf, is_watermarking_applicable, get_method
 
@@ -203,16 +206,27 @@ def create_app():
             if not source_path.exists():
                 raise RuntimeError("RMAP source document is missing")
 
-            method = "toy-eof"
+            method = f"{JZDotGridWatermark.name}+{AKMetadataWatermark.name}"
             intended_for = str(identity)
             secret = intended_for
-            key = expected_link
+            key = hmac.new(
+                app.config["SECRET_KEY"].encode("utf-8"),
+                b"rmap-watermark:" + expected_link.encode("utf-8"),
+                hashlib.sha256,
+            ).hexdigest()
 
             wm_bytes = WMUtils.apply_watermark(
                 pdf=str(source_path),
                 secret=secret,
                 key=key,
-                method=method,
+                method=JZDotGridWatermark.name,
+                position=None,
+            )
+            wm_bytes = WMUtils.apply_watermark(
+                pdf=wm_bytes,
+                secret=secret,
+                key=key,
+                method=AKMetadataWatermark.name,
                 position=None,
             )
 
