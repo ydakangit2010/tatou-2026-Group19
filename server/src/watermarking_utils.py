@@ -44,6 +44,7 @@ from watermarking_method import (
 from add_after_eof import AddAfterEOF
 from unsafe_bash_bridge_append_eof import UnsafeBashBridgeAppendEOF
 from ak_metadata_watermark import AKMetadataWatermark
+from jz_watermark import JZDotGridWatermark
 
 # --------------------
 # Method registry
@@ -53,6 +54,7 @@ METHODS: Dict[str, WatermarkingMethod] = {
     AddAfterEOF.name: AddAfterEOF(),
     UnsafeBashBridgeAppendEOF.name: UnsafeBashBridgeAppendEOF(),
     AKMetadataWatermark.name: AKMetadataWatermark(),
+    JZDotGridWatermark.name: JZDotGridWatermark(),
 }
 """Registry of available watermarking methods.
 
