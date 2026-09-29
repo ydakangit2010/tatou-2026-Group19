@@ -811,8 +811,9 @@ def create_app():
             )
             if applicable is False:
                 return jsonify({"error": "watermarking method not applicable"}), 400
-        except Exception as e:
-            return jsonify({"error": f"watermark applicability check failed: {e}"}), 400
+        except Exception:
+            app.logger.exception("Watermark applicability check failed")
+            return jsonify({"error": "watermarking method not applicable"}), 400
 
         # apply watermark → bytes
         try:
@@ -825,8 +826,9 @@ def create_app():
             )
             if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
                 return jsonify({"error": "watermarking produced no output"}), 500
-        except Exception as e:
-            return jsonify({"error": f"watermarking failed: {e}"}), 500
+        except Exception:
+            app.logger.exception("Watermarking failed")
+            return jsonify({"error": "watermarking failed"}), 500
 
         # build destination file name: "<original_name>__<intended_to>.pdf"
         base_name = Path(row.name or file_path.name).stem
@@ -841,8 +843,9 @@ def create_app():
         try:
             with dest_path.open("wb") as f:
                 f.write(wm_bytes)
-        except Exception as e:
-            return jsonify({"error": f"failed to write watermarked file: {e}"}), 500
+        except Exception:
+            app.logger.exception("Failed to write watermarked file")
+            return jsonify({"error": "failed to write watermarked file"}), 500
 
         # link token = sha1(watermarked_file_name)
         link_token = secrets.token_hex(20)
@@ -865,13 +868,14 @@ def create_app():
                     },
                 )
                 vid = int(conn.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-        except Exception as e:
+        except Exception:
+            app.logger.exception("Database error during version insert")
             # best-effort cleanup if DB insert fails
             try:
                 dest_path.unlink(missing_ok=True)
             except Exception:
                 pass
-            return jsonify({"error": f"database error during version insert: {e}"}), 503
+            return jsonify({"error": "database error"}), 503
 
         return jsonify({
             "id": vid,
@@ -1034,8 +1038,9 @@ def create_app():
                 pdf=str(file_path),
                 key=key
             )
-        except Exception as e:
-            return jsonify({"error": f"Error when attempting to read watermark: {e}"}), 400
+        except Exception:
+            app.logger.exception("Error when attempting to read watermark")
+            return jsonify({"error": "could not read watermark"}), 400
         return jsonify({
             "documentid": doc_id,
             "secret": secret,
