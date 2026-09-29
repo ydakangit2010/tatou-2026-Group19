@@ -709,13 +709,13 @@ def create_app():
                     fp.unlink()
                     file_deleted = True
                 except Exception as e:
-                    delete_error = f"failed to delete file: {e}"
+                    delete_error = "failed to delete file"
                     app.logger.warning("Failed to delete file %s for doc id=%s: %s", fp, row.id, e)
             else:
                 file_missing = True
         except RuntimeError as e:
             # Path escapes storage root; refuse to touch the file
-            delete_error = str(e)
+            delete_error = "document path invalid"
             app.logger.error("Path safety check failed for doc id=%s: %s", row.id, e)
 
         # Delete DB row (will cascade to Version if FK has ON DELETE CASCADE)
