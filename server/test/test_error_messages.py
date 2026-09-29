@@ -77,7 +77,8 @@ class OutsideStorageEngine:
 
     def execute(self, statement, params=None):
         return SimpleNamespace(
-            first=lambda: SimpleNamespace(id=123, path="/srv/outside-storage/owner.pdf")
+            first=lambda: SimpleNamespace(id=123, path="/srv/outside-storage/owner.pdf"),
+            all=lambda: [],
         )
 
 
