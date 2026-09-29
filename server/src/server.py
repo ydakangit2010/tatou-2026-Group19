@@ -379,6 +379,9 @@ def create_app():
         fname = secure_filename(file.filename)
         if not fname:
             return jsonify({"error": "invalid filename"}), 400
+        if file.stream.read(5) != b"%PDF-":
+            return jsonify({"error": "file must be a PDF"}), 400
+        file.stream.seek(0)
 
         user_dir = app.config["STORAGE_DIR"] / "files" / str(g.user["id"])
         user_dir.mkdir(parents=True, exist_ok=True)
@@ -506,7 +509,7 @@ def create_app():
             with get_engine().connect() as conn:
                 rows = conn.execute(
                     text("""
-                        SELECT v.id, v.documentid, v.link, v.intended_for, v.method
+                        SELECT v.id, v.documentid, v.link, v.intended_for, v.secret, v.method
                         FROM Users u
                         JOIN Documents d ON d.ownerid = u.id
                         JOIN Versions v ON d.id = v.documentid
@@ -523,6 +526,7 @@ def create_app():
             "documentid": int(r.documentid),
             "link": r.link,
             "intended_for": r.intended_for,
+            "secret": r.secret,
             "method": r.method,
         } for r in rows]
         return jsonify({"versions": versions}), 200
@@ -724,10 +728,21 @@ def create_app():
                 # If your schema does NOT have ON DELETE CASCADE on Version.documentid,
                 # uncomment the next line first:
                 # conn.execute(text("DELETE FROM Version WHERE documentid = :id"), {"id": doc_id})
+                version_paths = [
+                    r.path for r in conn.execute(
+                        text("SELECT path FROM Versions WHERE documentid = :id"), {"id": doc_id}
+                    ).all()
+                ]
                 conn.execute(text("DELETE FROM Documents WHERE id = :id"), {"id": doc_id})
         except Exception:
             app.logger.exception("Database error during delete")
             return jsonify({"error": "database error"}), 503
+
+        for version_path in version_paths:
+            try:
+                _safe_resolve_under_storage(version_path, storage_root).unlink(missing_ok=True)
+            except Exception:
+                app.logger.warning("Failed to delete version file for doc id=%s", row.id, exc_info=True)
 
         return jsonify({
             "deleted": True,
