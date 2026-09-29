@@ -40,6 +40,7 @@ def create_app():
     app.config["SECRET_KEY"] = secret_key
     app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
+    app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
     app.config["DB_USER"] = os.environ.get("DB_USER", "tatou")
     app.config["DB_PASSWORD"] = os.environ.get("DB_PASSWORD", "tatou")
@@ -138,6 +139,10 @@ def create_app():
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 h.update(chunk)
         return h.hexdigest()
+
+    @app.errorhandler(413)
+    def request_too_large(_error):
+        return jsonify({"error": "file too large (max 20 MB)"}), 413
 
     # --- Routes ---
     
