@@ -33,7 +33,7 @@
         </div>
         <div style="margin-bottom:20px;">
           <label for="password">Password</label><br>
-          <input type="password" id="password" name="password" required style="width:100%;padding:10px;border-radius:8px;border:1px solid #ccc;">
+          <input type="password" id="password" name="password" required minlength="15" maxlength="128" style="width:100%;padding:10px;border-radius:8px;border:1px solid #ccc;">
         </div>
         <button class="btn btn--primary" type="submit" style="width:100%;">Sign up</button>
       </form>
@@ -58,7 +58,7 @@
         });
         if (!resp.ok) {
           const err = await resp.json().catch(() => ({}));
-          alert('Error: ' + (err.message || resp.statusText));
+          alert('Error: ' + (err.error || err.message || resp.statusText));
           return;
         }
         const result = await resp.json();

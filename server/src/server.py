@@ -3,6 +3,7 @@ import io
 import hashlib
 import hmac
 import secrets
+import time
 import datetime as dt
 from pathlib import Path
 from functools import wraps
@@ -39,6 +40,7 @@ def create_app():
     app.config["SECRET_KEY"] = secret_key
     app.config["STORAGE_DIR"] = Path(os.environ.get("STORAGE_DIR", "./storage")).resolve()
     app.config["TOKEN_TTL_SECONDS"] = int(os.environ.get("TOKEN_TTL_SECONDS", "86400"))
+    app.config["MAX_CONTENT_LENGTH"] = 20 * 1024 * 1024
 
     app.config["DB_USER"] = os.environ.get("DB_USER", "tatou")
     app.config["DB_PASSWORD"] = os.environ.get("DB_PASSWORD", "tatou")
@@ -90,6 +92,24 @@ def create_app():
         return srv
 
     # --- Helpers ---
+    dummy_password_hash = generate_password_hash(secrets.token_hex(16))
+
+    def too_many_attempts(limit: int = 10, window: int = 60) -> bool:
+        attempts = app.config.setdefault("_ATTEMPTS", {})
+        if len(attempts) > 10000:
+            attempts.clear()
+        key = (request.path, request.remote_addr)
+        now = time.monotonic()
+        recent = [t for t in attempts.get(key, []) if now - t < window]
+        if len(recent) >= limit:
+            attempts[key] = recent
+            return True
+        attempts[key] = recent + [now]
+        return False
+
+    def _throttled():
+        return jsonify({"error": "too many attempts, try again later"}), 429, {"Retry-After": "60"}
+
     def _serializer():
         return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
 
@@ -119,6 +139,10 @@ def create_app():
             for chunk in iter(lambda: f.read(1024 * 1024), b""):
                 h.update(chunk)
         return h.hexdigest()
+
+    @app.errorhandler(413)
+    def request_too_large(_error):
+        return jsonify({"error": "file too large (max 20 MB)"}), 413
 
     # --- Routes ---
     
@@ -282,12 +306,16 @@ def create_app():
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
     def create_user():
+        if too_many_attempts():
+            return _throttled()
         payload = request.get_json(silent=True) or {}
         email = (payload.get("email") or "").strip().lower()
         login = (payload.get("login") or "").strip()
         password = payload.get("password") or ""
         if not email or not login or not password:
             return jsonify({"error": "email, login, and password are required"}), 400
+        if not 15 <= len(password) <= 128:
+            return jsonify({"error": "password must be 15 to 128 characters long"}), 400
 
         hpw = generate_password_hash(password)
 
@@ -313,6 +341,8 @@ def create_app():
     # POST /api/login {login, password}
     @app.post("/api/login")
     def login():
+        if too_many_attempts():
+            return _throttled()
         payload = request.get_json(silent=True) or {}
         email = (payload.get("email") or "").strip()
         password = payload.get("password") or ""
@@ -329,7 +359,8 @@ def create_app():
             app.logger.exception("Database error during login")
             return jsonify({"error": "database error"}), 503
 
-        if not row or not check_password_hash(row.hpassword, password):
+        password_ok = check_password_hash(row.hpassword if row else dummy_password_hash, password)
+        if not row or not password_ok:
             return jsonify({"error": "invalid credentials"}), 401
 
         token = _serializer().dumps({"uid": int(row.id), "login": row.login, "email": row.email})
@@ -349,7 +380,7 @@ def create_app():
         if not fname:
             return jsonify({"error": "invalid filename"}), 400
 
-        user_dir = app.config["STORAGE_DIR"] / "files" / g.user["login"]
+        user_dir = app.config["STORAGE_DIR"] / "files" / str(g.user["id"])
         user_dir.mkdir(parents=True, exist_ok=True)
 
         ts = dt.datetime.utcnow().strftime("%Y%m%dT%H%M%S%fZ")
@@ -448,9 +479,9 @@ def create_app():
                         FROM Users u
                         JOIN Documents d ON d.ownerid = u.id
                         JOIN Versions v ON d.id = v.documentid
-                        WHERE u.login = :glogin AND d.id = :did
+                        WHERE d.ownerid = :uid AND d.id = :did
                     """),
-                    {"glogin": str(g.user["login"]), "did": document_id},
+                    {"uid": int(g.user["id"]), "did": document_id},
                 ).all()
         except Exception:
             app.logger.exception("Database error while listing versions")
@@ -479,9 +510,9 @@ def create_app():
                         FROM Users u
                         JOIN Documents d ON d.ownerid = u.id
                         JOIN Versions v ON d.id = v.documentid
-                        WHERE u.login = :glogin
+                        WHERE d.ownerid = :uid
                     """),
-                    {"glogin": str(g.user["login"])},
+                    {"uid": int(g.user["id"])},
                 ).all()
         except Exception:
             app.logger.exception("Database error while listing versions")
@@ -678,13 +709,13 @@ def create_app():
                     fp.unlink()
                     file_deleted = True
                 except Exception as e:
-                    delete_error = f"failed to delete file: {e}"
+                    delete_error = "failed to delete file"
                     app.logger.warning("Failed to delete file %s for doc id=%s: %s", fp, row.id, e)
             else:
                 file_missing = True
         except RuntimeError as e:
             # Path escapes storage root; refuse to touch the file
-            delete_error = str(e)
+            delete_error = "document path invalid"
             app.logger.error("Path safety check failed for doc id=%s: %s", row.id, e)
 
         # Delete DB row (will cascade to Version if FK has ON DELETE CASCADE)
@@ -780,8 +811,9 @@ def create_app():
             )
             if applicable is False:
                 return jsonify({"error": "watermarking method not applicable"}), 400
-        except Exception as e:
-            return jsonify({"error": f"watermark applicability check failed: {e}"}), 400
+        except Exception:
+            app.logger.exception("Watermark applicability check failed")
+            return jsonify({"error": "watermarking method not applicable"}), 400
 
         # apply watermark → bytes
         try:
@@ -794,27 +826,28 @@ def create_app():
             )
             if not isinstance(wm_bytes, (bytes, bytearray)) or len(wm_bytes) == 0:
                 return jsonify({"error": "watermarking produced no output"}), 500
-        except Exception as e:
-            return jsonify({"error": f"watermarking failed: {e}"}), 500
+        except Exception:
+            app.logger.exception("Watermarking failed")
+            return jsonify({"error": "watermarking failed"}), 500
 
-        # build destination file name: "<original_name>__<intended_to>.pdf"
+        # build destination file name: "<original_name>__<intended_to>__<link_token>.pdf"
+        link_token = secrets.token_hex(20)
         base_name = Path(row.name or file_path.name).stem
         intended_slug = secure_filename(intended_for)
         dest_dir = file_path.parent / "watermarks"
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        candidate = f"{base_name}__{intended_slug}.pdf"
+        candidate = f"{base_name}__{intended_slug}__{link_token}.pdf"
         dest_path = dest_dir / candidate
 
         # write bytes
         try:
             with dest_path.open("wb") as f:
                 f.write(wm_bytes)
-        except Exception as e:
-            return jsonify({"error": f"failed to write watermarked file: {e}"}), 500
+        except Exception:
+            app.logger.exception("Failed to write watermarked file")
+            return jsonify({"error": "failed to write watermarked file"}), 500
 
-        # link token = sha1(watermarked_file_name)
-        link_token = secrets.token_hex(20)
 
         try:
             with get_engine().begin() as conn:
@@ -834,13 +867,14 @@ def create_app():
                     },
                 )
                 vid = int(conn.execute(text("SELECT LAST_INSERT_ID()")).scalar())
-        except Exception as e:
+        except Exception:
+            app.logger.exception("Database error during version insert")
             # best-effort cleanup if DB insert fails
             try:
                 dest_path.unlink(missing_ok=True)
             except Exception:
                 pass
-            return jsonify({"error": f"database error during version insert: {e}"}), 503
+            return jsonify({"error": "database error"}), 503
 
         return jsonify({
             "id": vid,
@@ -1003,8 +1037,9 @@ def create_app():
                 pdf=str(file_path),
                 key=key
             )
-        except Exception as e:
-            return jsonify({"error": f"Error when attempting to read watermark: {e}"}), 400
+        except Exception:
+            app.logger.exception("Error when attempting to read watermark")
+            return jsonify({"error": "could not read watermark"}), 400
         return jsonify({
             "documentid": doc_id,
             "secret": secret,

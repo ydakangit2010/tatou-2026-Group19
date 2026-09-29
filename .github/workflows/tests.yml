@@ -8,6 +8,19 @@ jobs:
   pytest:
     runs-on: ubuntu-latest
 
+    services:
+      mariadb:
+        image: mariadb:11.4
+        env:
+          MARIADB_ROOT_PASSWORD: test-root
+        ports:
+          - "3307:3306"
+        options: >-
+          --health-cmd="healthcheck.sh --connect --innodb_initialized"
+          --health-interval=5s
+          --health-timeout=5s
+          --health-retries=20
+
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -27,4 +40,5 @@ jobs:
         working-directory: server
         env:
           SECRET_KEY: test-only-secret-key
+          TEST_DB_REQUIRED: "1"
         run: pytest -q

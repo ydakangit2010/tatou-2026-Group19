@@ -1,3 +1,6 @@
+import io
+from pathlib import Path
+
 from types import SimpleNamespace
 
 from itsdangerous import URLSafeTimedSerializer
@@ -76,3 +79,296 @@ def test_authenticated_non_owner_cannot_delete_document(monkeypatch):
 
     assert response.status_code == 404
     assert response.get_json() == {"error": "document not found"}
+
+
+def test_authenticated_non_owner_cannot_create_watermark(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", FakeEngine())
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "other_user",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.post(
+        "/api/create-watermark/123",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+        json={
+            "method": "toy-eof",
+            "intended_for": "attacker",
+            "secret": "secret",
+            "key": "key",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "document not found"}
+
+
+def test_authenticated_non_owner_cannot_read_watermark(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", FakeEngine())
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "other_user",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.post(
+        "/api/read-watermark/123",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+        json={
+            "method": "toy-eof",
+            "key": "key",
+        },
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "document not found"}
+
+
+def test_authenticated_non_owner_cannot_get_document(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", FakeEngine())
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "other_user",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.get(
+        "/api/get-document/123",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+    )
+
+    assert response.status_code == 404
+    assert response.get_json() == {"error": "document not found"}
+
+
+class FakeListConnection(FakeConnection):
+    def execute(self, statement, params=None):
+        params = params or {}
+        is_owner = (
+            params.get("glogin", "alice") == "alice"
+            and int(params.get("uid", 10)) == 10
+        )
+        rows = [
+            SimpleNamespace(
+                id=1,
+                documentid=123,
+                link="owner-link",
+                intended_for="bob",
+                secret="owner-secret",
+                method="toy-eof",
+                name="test.pdf",
+                creation="2026-09-28T00:00:00",
+                sha256_hex="00",
+                size=4,
+            )
+        ] if is_owner else []
+        return SimpleNamespace(all=lambda: rows)
+
+
+class FakeListEngine:
+    def connect(self):
+        return FakeListConnection()
+
+
+def test_user_with_same_login_cannot_list_versions(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", FakeListEngine())
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "alice",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.get(
+        "/api/list-versions/123",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"versions": []}
+
+
+def test_user_with_same_login_cannot_list_all_versions(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", FakeListEngine())
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "alice",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.get(
+        "/api/list-all-versions",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"versions": []}
+
+
+def test_authenticated_user_cannot_see_other_users_documents(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", FakeListEngine())
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "other_user",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.get(
+        "/api/list-documents",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json() == {"documents": []}
+
+
+class FakeUploadConnection(FakeConnection):
+    def __init__(self):
+        self.inserted = None
+
+    def execute(self, statement, params=None):
+        if "INSERT INTO Documents" in str(statement):
+            self.inserted = params
+        return SimpleNamespace(
+            scalar=lambda: 1,
+            one=lambda: SimpleNamespace(
+                id=1,
+                name="test.pdf",
+                creation="2026-09-28T00:00:00",
+                sha256_hex="00",
+                size=4,
+            ),
+        )
+
+
+class FakeUploadEngine:
+    def __init__(self):
+        self.connection = FakeUploadConnection()
+
+    def begin(self):
+        return self.connection
+
+
+def test_authenticated_user_cannot_upload_into_other_users_account(monkeypatch, tmp_path):
+    engine = FakeUploadEngine()
+    monkeypatch.setitem(app.config, "_ENGINE", engine)
+    monkeypatch.setitem(app.config, "STORAGE_DIR", tmp_path)
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "other_user",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.post(
+        "/api/upload-document",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+        data={
+            "file": (io.BytesIO(b"%PDF-1.4"), "test.pdf"),
+            "ownerid": "10",
+        },
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    assert engine.connection.inserted["ownerid"] == 20
+
+
+def test_upload_is_stored_in_folder_named_after_user_id(monkeypatch, tmp_path):
+    engine = FakeUploadEngine()
+    monkeypatch.setitem(app.config, "_ENGINE", engine)
+    monkeypatch.setitem(app.config, "STORAGE_DIR", tmp_path)
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "../escape",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.post(
+        "/api/upload-document",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"file": (io.BytesIO(b"%PDF-1.4"), "test.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    assert Path(engine.connection.inserted["path"]).parent == tmp_path / "files" / "20"
