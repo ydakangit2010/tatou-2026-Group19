@@ -830,13 +830,14 @@ def create_app():
             app.logger.exception("Watermarking failed")
             return jsonify({"error": "watermarking failed"}), 500
 
-        # build destination file name: "<original_name>__<intended_to>.pdf"
+        # build destination file name: "<original_name>__<intended_to>__<link_token>.pdf"
+        link_token = secrets.token_hex(20)
         base_name = Path(row.name or file_path.name).stem
         intended_slug = secure_filename(intended_for)
         dest_dir = file_path.parent / "watermarks"
         dest_dir.mkdir(parents=True, exist_ok=True)
 
-        candidate = f"{base_name}__{intended_slug}.pdf"
+        candidate = f"{base_name}__{intended_slug}__{link_token}.pdf"
         dest_path = dest_dir / candidate
 
         # write bytes
@@ -847,8 +848,6 @@ def create_app():
             app.logger.exception("Failed to write watermarked file")
             return jsonify({"error": "failed to write watermarked file"}), 500
 
-        # link token = sha1(watermarked_file_name)
-        link_token = secrets.token_hex(20)
 
         try:
             with get_engine().begin() as conn:
