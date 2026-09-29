@@ -19,9 +19,9 @@ def create_and_login(client, email, login):
     return {"Authorization": f"Bearer {response.get_json()['token']}"}
 
 
-def owner_with_version_and_attacker(client, attacker_login):
+def owner_with_version_and_attacker(client):
     owner = create_and_login(client, "owner@test.local", "alice")
-    attacker = create_and_login(client, "attacker@test.local", attacker_login)
+    attacker = create_and_login(client, "attacker@test.local", "mallory")
 
     pdf = pymupdf.open()
     pdf.new_page()
@@ -49,9 +49,8 @@ def owner_with_version_and_attacker(client, attacker_login):
     return document_id, attacker
 
 
-@pytest.mark.parametrize("attacker_login", ["alice", "ALICE"])
-def test_user_with_same_login_cannot_list_versions(db_client, attacker_login):
-    document_id, attacker = owner_with_version_and_attacker(db_client, attacker_login)
+def test_other_user_cannot_list_versions(db_client):
+    document_id, attacker = owner_with_version_and_attacker(db_client)
 
     response = db_client.get(f"/api/list-versions/{document_id}", headers=attacker)
 
@@ -59,11 +58,35 @@ def test_user_with_same_login_cannot_list_versions(db_client, attacker_login):
     assert response.get_json() == {"versions": []}
 
 
-@pytest.mark.parametrize("attacker_login", ["alice", "ALICE"])
-def test_user_with_same_login_cannot_list_all_versions(db_client, attacker_login):
-    _, attacker = owner_with_version_and_attacker(db_client, attacker_login)
+def test_other_user_cannot_list_all_versions(db_client):
+    _, attacker = owner_with_version_and_attacker(db_client)
 
     response = db_client.get("/api/list-all-versions", headers=attacker)
 
     assert response.status_code == 200
     assert response.get_json() == {"versions": []}
+
+
+@pytest.mark.parametrize("login", ["alice", "ALICE"])
+def test_cannot_register_existing_login(db_client, login):
+    create_and_login(db_client, "owner@test.local", "alice")
+
+    response = db_client.post(
+        "/api/create-user",
+        json={"email": "attacker@test.local", "login": login, "password": "password"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json() == {"error": "email or login already exists"}
+
+
+def test_cannot_register_existing_email(db_client):
+    create_and_login(db_client, "owner@test.local", "alice")
+
+    response = db_client.post(
+        "/api/create-user",
+        json={"email": "owner@test.local", "login": "mallory", "password": "password"},
+    )
+
+    assert response.status_code == 409
+    assert response.get_json() == {"error": "email or login already exists"}
