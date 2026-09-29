@@ -1,4 +1,5 @@
 import io
+from pathlib import Path
 
 from types import SimpleNamespace
 
@@ -340,3 +341,34 @@ def test_authenticated_user_cannot_upload_into_other_users_account(monkeypatch, 
 
     assert response.status_code == 201
     assert engine.connection.inserted["ownerid"] == 20
+
+
+def test_upload_is_stored_in_folder_named_after_user_id(monkeypatch, tmp_path):
+    engine = FakeUploadEngine()
+    monkeypatch.setitem(app.config, "_ENGINE", engine)
+    monkeypatch.setitem(app.config, "STORAGE_DIR", tmp_path)
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "../escape",
+            "email": "other@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.post(
+        "/api/upload-document",
+        headers={"Authorization": f"Bearer {token}"},
+        data={"file": (io.BytesIO(b"%PDF-1.4"), "test.pdf")},
+        content_type="multipart/form-data",
+    )
+
+    assert response.status_code == 201
+    assert Path(engine.connection.inserted["path"]).parent == tmp_path / "files" / "20"
