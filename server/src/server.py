@@ -3,6 +3,7 @@ import io
 import hashlib
 import hmac
 import secrets
+import time
 import datetime as dt
 from pathlib import Path
 from functools import wraps
@@ -91,6 +92,22 @@ def create_app():
 
     # --- Helpers ---
     dummy_password_hash = generate_password_hash(secrets.token_hex(16))
+
+    def too_many_attempts(limit: int = 10, window: int = 60) -> bool:
+        attempts = app.config.setdefault("_ATTEMPTS", {})
+        if len(attempts) > 10000:
+            attempts.clear()
+        key = (request.path, request.remote_addr)
+        now = time.monotonic()
+        recent = [t for t in attempts.get(key, []) if now - t < window]
+        if len(recent) >= limit:
+            attempts[key] = recent
+            return True
+        attempts[key] = recent + [now]
+        return False
+
+    def _throttled():
+        return jsonify({"error": "too many attempts, try again later"}), 429, {"Retry-After": "60"}
 
     def _serializer():
         return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
@@ -284,6 +301,8 @@ def create_app():
     # POST /api/create-user {email, login, password}
     @app.post("/api/create-user")
     def create_user():
+        if too_many_attempts():
+            return _throttled()
         payload = request.get_json(silent=True) or {}
         email = (payload.get("email") or "").strip().lower()
         login = (payload.get("login") or "").strip()
@@ -317,6 +336,8 @@ def create_app():
     # POST /api/login {login, password}
     @app.post("/api/login")
     def login():
+        if too_many_attempts():
+            return _throttled()
         payload = request.get_json(silent=True) or {}
         email = (payload.get("email") or "").strip()
         password = payload.get("password") or ""

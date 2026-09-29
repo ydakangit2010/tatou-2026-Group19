@@ -44,3 +44,8 @@ def db_client(monkeypatch, tmp_path):
     monkeypatch.setitem(app.config, "STORAGE_DIR", tmp_path)
     yield app.test_client()
     engine.dispose()
+
+
+@pytest.fixture(autouse=True)
+def reset_attempt_counters(monkeypatch):
+    monkeypatch.setitem(app.config, "_ATTEMPTS", {})

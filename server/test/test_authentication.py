@@ -61,3 +61,30 @@ def test_signup_rejects_password_longer_than_128_characters():
 
     assert response.status_code == 400
     assert response.get_json() == {"error": "password must be 15 to 128 characters long"}
+
+
+def test_login_is_throttled_after_10_attempts_per_minute(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", NoUserEngine())
+    client = app.test_client()
+    attempt = {"email": "nobody@test.local", "password": "guess"}
+
+    for _ in range(10):
+        assert client.post("/api/login", json=attempt).status_code == 401
+
+    response = client.post("/api/login", json=attempt)
+    assert response.status_code == 429
+    assert response.get_json() == {"error": "too many attempts, try again later"}
+
+    other_ip = client.post("/api/login", json=attempt, environ_base={"REMOTE_ADDR": "10.0.0.2"})
+    assert other_ip.status_code == 401
+
+
+def test_signup_is_throttled_after_10_attempts_per_minute():
+    client = app.test_client()
+    attempt = {"email": "new@test.local", "login": "new", "password": "short"}
+
+    for _ in range(10):
+        assert client.post("/api/create-user", json=attempt).status_code == 400
+
+    response = client.post("/api/create-user", json=attempt)
+    assert response.status_code == 429
