@@ -90,6 +90,8 @@ def create_app():
         return srv
 
     # --- Helpers ---
+    dummy_password_hash = generate_password_hash(secrets.token_hex(16))
+
     def _serializer():
         return URLSafeTimedSerializer(app.config["SECRET_KEY"], salt="tatou-auth")
 
@@ -329,7 +331,8 @@ def create_app():
             app.logger.exception("Database error during login")
             return jsonify({"error": "database error"}), 503
 
-        if not row or not check_password_hash(row.hpassword, password):
+        password_ok = check_password_hash(row.hpassword if row else dummy_password_hash, password)
+        if not row or not password_ok:
             return jsonify({"error": "invalid credentials"}), 401
 
         token = _serializer().dumps({"uid": int(row.id), "login": row.login, "email": row.email})
