@@ -31,11 +31,43 @@
 - [rmap-get-link](#rmap-get-link) — **POST** `/api/rmap-get-link`
 
 
+# Conventions
+
+These rules apply to every route unless its own section says otherwise.
+
+**Authentication**
+ * Routes marked "Requires authentication" MUST be called with the header `Authorization: Bearer <token>`, using a token from [login](#login).
+ * A missing, invalid or expired token MUST be answered with `401`.
+
+**Ownership**
+ * A route that reads or changes documents, versions or watermarks MUST only act on data owned by the authenticated user.
+ * Ownership MUST be decided by the user's numeric id, taken from the signed token. It MUST NOT be decided by the login name or by any value in the request, such as an `ownerid` form field.
+ * A request for another user's document MUST be answered exactly like a request for a document that does not exist (`404 {"error": "document not found"}`), so that it does not reveal whether the document exists.
+ * List routes MUST return an empty list, not an error, when the user owns nothing matching.
+
+**Errors**
+ * Errors MUST be returned as JSON of the form `{"error": <string>}`.
+ * Error messages MUST NOT contain internal details such as exception text, SQL statements, file paths or library messages. Those details are written to the server log instead.
+
+| Status | Meaning |
+| --- | --- |
+| `400` | Missing or invalid parameters |
+| `401` | Missing, invalid or expired token, or wrong credentials |
+| `404` | The resource does not exist or belongs to another user |
+| `409` | The email or login is already registered |
+| `410` | The database entry exists but its file is missing on disk |
+| `413` | The request body is larger than 20 MB |
+| `429` | Too many attempts; the response carries a `Retry-After` header in seconds |
+| `503` | The database could not be reached or rejected the operation |
+
+**Limits**
+ * Request bodies, including uploads, MUST NOT exceed 20 MB. Larger requests MUST be answered with `413 {"error": "file too large (max 20 MB)"}`.
+
 
 ## healthz
 
 **Path**
-`GET /api/healthz`
+`GET /healthz`
 
 **Description**  
 This endpoint checks the health of the server and confirms it is running.
@@ -46,15 +78,17 @@ _None_
 **Return**
 ```json
 {
-  "message": <string>
+  "message": <string>,
+  "db_connected": <bool>
 }
 ```
 
 **Specification**
  * The healthz endpoint MUST be accessible without authentication.
  * The response MUST always contain a "message" field of type string.
+ * `db_connected` reports whether the server can currently reach the database.
  
- ## create-user
+## create-user
  
 **Path**
 `POST /api/create-user`
@@ -84,6 +118,12 @@ This endpoint creates a new user account in the system.
 **Specification**
  * The create-user endpoint MUST validate that username, password, and email are provided.
  * The response MUST include a unique id along with the created username and email.
+ * Emails MUST be unique. They are stored in lower case.
+ * Logins MUST be unique, compared without regard to letter case (`Alice` and `alice` are the same login).
+ * The password MUST be 15 to 128 characters long. Otherwise the response MUST be `400 {"error": "password must be 15 to 128 characters long"}`.
+ * If the email or the login is already registered, the response MUST be `409 {"error": "email or login already exists"}`. The message MUST NOT say which of the two is taken, so that the route reveals as little as possible about existing accounts.
+ * The endpoint MUST be limited to 10 requests per minute per client IP address; further requests get `429`.
+ * Passwords MUST only be stored as salted hashes.
 
 
 ## login
@@ -114,8 +154,10 @@ This endpoint authenticates a user with their credentials and returns a session 
 **Specification**
  * The login endpoint MUST reject requests missing email or password.
  * The response MUST include a token string and its expiration date as an integer Time To Live in seconds.
+ * An unknown email and a wrong password MUST get the same response, `401 {"error": "invalid credentials"}`, and MUST take about the same time to answer, so that neither the message nor the response time reveals which emails are registered.
+ * The endpoint MUST be limited to 10 requests per minute per client IP address; further requests get `429`.
  
- ## upload-document
+## upload-document
 
 **Path**
 `POST /api/upload-document`
@@ -123,7 +165,7 @@ This endpoint authenticates a user with their credentials and returns a session 
 **Description**  
 This endpoint uploads a PDF document to the server and registers its metadata.
 
-**Parameters**
+**Parameters** (as `multipart/form-data`)
 ```json
 {
   "file": <pdf file>,
@@ -145,6 +187,10 @@ This endpoint uploads a PDF document to the server and registers its metadata.
 **Specification**
  * Requires authentication
  * The upload-pdf endpoint MUST accept only files in PDF format.
+ * The uploaded document MUST be owned by the authenticated user. Any owner given in the request MUST be ignored.
+ * `name` is optional; the uploaded file's name is used when it is missing.
+ * Uploads larger than 20 MB MUST be refused with `413`.
+ * The file MUST be stored inside the server's storage directory, in a folder named after the user's numeric id. User-supplied values such as the login or the filename MUST NOT be able to place it anywhere else.
 
 ## list-documents
 
@@ -175,8 +221,9 @@ _None_
 **Specification**
  * Requires authentication
  * The response MUST return all documents of the user.
+ * The response MUST NOT include documents of other users.
  
- ## list-versions
+## list-versions
 
 **Description**  
 This endpoint lists all watermarked versions of a given PDF document along with their metadata.
@@ -184,7 +231,7 @@ This endpoint lists all watermarked versions of a given PDF document along with 
 **Path**
 `GET /api/list-versions`
 
-**Parameters**
+**Parameters** (as query string: `?id=` or `?documentid=`)
 ```json
 {
   "documentid": <int>
@@ -217,12 +264,14 @@ _None_
 
 **Specification**
  * Requires authentication
+ * The response MUST only contain versions of the given document when it is owned by the authenticated user, decided by the user's id (see [Conventions](#conventions)). Otherwise the list MUST be empty.
+ * A missing or non-numeric document id MUST be answered with `400`.
  
  
- ## list-all-versions
+## list-all-versions
  
 **Path**
-`GET /api/list-versions`
+`GET /api/list-all-versions`
 
 **Description**  
 This endpoint lists all versions of all PDF documents for the authenticated user stored in the system.
@@ -248,8 +297,9 @@ _None_
 
 **Specification**
  * Requires authentication
+ * The response MUST contain the versions of every document owned by the authenticated user, decided by the user's id, and no others.
  
- ## get-document
+## get-document
  
 **Description**  
 This endpoint retrieves a PDF document by fetching a specific one when an `id` is provided.
@@ -258,7 +308,7 @@ This endpoint retrieves a PDF document by fetching a specific one when an `id` i
 `GET /api/get-document`
 
 
-**Parameters**
+**Parameters** (as query string: `?id=` or `?documentid=`)
 ```json
 {
   "id": <int>
@@ -273,8 +323,69 @@ Inline PDF file in binary format.
 
 **Specification**
  * Requires authentication
+ * Only the owner of the document MUST be able to retrieve it. Anyone else MUST get `404 {"error": "document not found"}`.
+ * A missing or non-numeric document id MUST be answered with `400`.
+
+## delete-document
+
+**Description**  
+This endpoint deletes a document, its file on disk and its watermarked versions.
+
+**Path**
+`DELETE /api/delete-document/<document_id>`
+
+**Parameters**  
+_None_
+
+**Path**
+`DELETE, POST /api/delete-document`
+
+**Parameters** (as query string `?id=` / `?documentid=`, or as JSON body)
+```json
+{
+  "id": <int>
+}
+```
+
+**Return**
+```json
+{
+  "deleted": true,
+  "id": <int>,
+  "file_deleted": <bool>,
+  "file_missing": <bool>,
+  "note": <string or null>
+}
+```
+
+**Specification**
+ * Requires authentication
+ * Only the owner of the document MUST be able to delete it. Anyone else MUST get `404 {"error": "document not found"}`, and nothing may be deleted.
+ * Deleting a document MUST also delete its watermarked versions.
+ * The file MUST only be deleted when its stored path lies inside the server's storage directory.
+ * `note` is `null` when everything went well. Otherwise it MUST be one of the fixed texts `"failed to delete file"` or `"document path invalid"`, and MUST NOT contain file paths or exception text.
+
+## get-version
+
+**Description**  
+This endpoint retrieves a watermarked version of a document through its secret link. This is how a document owner shares a version with its intended recipient.
+
+**Path**
+`GET /api/get-version/<link>`
+
+**Parameters**  
+_None_
+
+**Return**
+Inline PDF file in binary format.
+
+**Specification**
+ * The get-version endpoint MUST be accessible without authentication; knowing the link is what grants access.
+ * Links MUST be unguessable: at least 128 bits of randomness, generated with a cryptographically secure random generator. Links from RMAP are the 32-hex session secret described in [rmap-get-link](#rmap-get-link).
+ * An unknown link MUST be answered with `404 {"error": "document not found"}`.
+ * Each link MUST keep serving the file of its own version, even after further versions of the same document are created for the same recipient.
  
-  ## get-watermarking-methods
+## get-watermarking-methods
  
 **Description**  
 This endpoint lists all available watermarking methods.
@@ -293,8 +404,8 @@ _None_
     "count": <int>,
     "methods": [
         {
-            "description":<string>,
-            "name": <string>"
+            "description": <string>,
+            "name": <string>
         }
     ]
 }
@@ -302,8 +413,9 @@ _None_
 
 **Specification**
  * The endpoint MUST return all methods in `watermarking_utils.METHODS`.
+ * The endpoint MUST be accessible without authentication.
  
-   ## read-watermark
+## read-watermark
  
 **Description**  
 This endpoint reads information contain in a pdf document's watermark with the provided method.
@@ -322,7 +434,7 @@ This endpoint reads information contain in a pdf document's watermark with the p
 ```
  
 **Path**
-`POST /api/read-watermark<int:document_id>`
+`POST /api/read-watermark/<int:document_id>`
 
 
 **Parameters**
@@ -346,13 +458,17 @@ This endpoint reads information contain in a pdf document's watermark with the p
 ```
 
 **Specification**
+ * Requires authentication
  * The endpoint MUST return the secret read in the document.
+ * Only the owner of the document MUST be able to read its watermark. Anyone else MUST get `404 {"error": "document not found"}`.
+ * `method` and `key` are required; `position` is optional.
+ * If the watermark cannot be read (unknown method, wrong key, no watermark), the response MUST be `400 {"error": "could not read watermark"}`.
 
 
-   ## create-watermark
+## create-watermark
  
 **Description**  
-This endpoint reads information contain in a pdf document's watermark with the provided method.
+This endpoint creates a watermarked version of a document for one intended recipient and returns the secret link to it.
  
 **Path**
 `POST /api/create-watermark`
@@ -370,7 +486,7 @@ This endpoint reads information contain in a pdf document's watermark with the p
 ```
  
 **Path**
-`POST /api/create-watermark<int:document_id>`
+`POST /api/create-watermark/<int:document_id>`
 
 
 **Parameters**
@@ -400,11 +516,15 @@ This endpoint reads information contain in a pdf document's watermark with the p
 ```
 
 **Specification**
- * Only the owner of a document should be able to create watermarked versions of their documents
+ * Requires authentication
+ * Only the owner of a document should be able to create watermarked versions of their documents. Anyone else MUST get `404 {"error": "document not found"}`.
  * The document owner MUST be able to list all versions of their documents and their intended recipients
- * The payload is a gpg encrypted JSON presented as ASCII armored base64, without any GPG headers.
+ * `method`, `intended_for`, `secret` and `key` are required; `position` is optional.
+ * Every call MUST create a new, separate version with its own file and its own link, even for a recipient who already has a version. Earlier versions MUST NOT be changed.
+ * An unknown or unsuitable method MUST be answered with `400 {"error": "watermarking method not applicable"}`.
+ * `secret` and `intended_for` are stored in columns of at most 320 characters.
 
- ## rmap-initiate
+## rmap-initiate
  
 **Description**  
 This endpoint receives GPG encrypted messages conforming to RMAP message 1.
@@ -450,8 +570,9 @@ should decrypt to:
  * The server SHOULD only respond to known identities.
  * All submitted group public keys MUST constitute valid identities.
  * The payload is a gpg encrypted JSON presented as ASCII armored base64, without any GPG headers.
+ * The endpoint does not require a bearer token; the client is authenticated by the RMAP handshake itself.
  
-  ## rmap-get-link
+## rmap-get-link
  
 **Description**  
 This endpoint receives GPG encrypted messages conforming to RMAP message 2.
@@ -493,3 +614,5 @@ should decrypt to:
 
 **Specification**
  * `get-version/<result>` SHOULD point to a watermarked version of a PDF specific to the group authenticated by the public key of the client.
+ * The watermarked version MUST be created and recorded in the database before the link is returned.
+ * The payload is a gpg encrypted JSON presented as ASCII armored base64, without any GPG headers.
