@@ -15,6 +15,9 @@ class FakeResult:
     def first(self):
         return self._row
 
+    def all(self):
+        return []
+
 
 class FakeConnection:
     def __enter__(self):
@@ -372,3 +375,30 @@ def test_upload_is_stored_in_folder_named_after_user_id(monkeypatch, tmp_path):
 
     assert response.status_code == 201
     assert Path(engine.connection.inserted["path"]).parent == tmp_path / "files" / "20"
+
+
+def test_authenticated_owner_can_delete_own_document(monkeypatch):
+    monkeypatch.setitem(app.config, "_ENGINE", FakeEngine())
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    owner_token = serializer.dumps(
+        {
+            "uid": 10,
+            "login": "owner_user",
+            "email": "owner@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.delete(
+        "/api/delete-document/123",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["deleted"] is True
