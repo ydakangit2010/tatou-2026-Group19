@@ -37,3 +37,27 @@ def test_login_checks_a_password_hash_even_for_unknown_email(monkeypatch):
     assert response.status_code == 401
     assert response.get_json() == {"error": "invalid credentials"}
     assert checked == ["guess"]
+
+
+def test_signup_rejects_password_shorter_than_15_characters():
+    client = app.test_client()
+
+    response = client.post(
+        "/api/create-user",
+        json={"email": "new@test.local", "login": "new", "password": "a" * 14},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "password must be 15 to 128 characters long"}
+
+
+def test_signup_rejects_password_longer_than_128_characters():
+    client = app.test_client()
+
+    response = client.post(
+        "/api/create-user",
+        json={"email": "new@test.local", "login": "new", "password": "a" * 129},
+    )
+
+    assert response.status_code == 400
+    assert response.get_json() == {"error": "password must be 15 to 128 characters long"}

@@ -7,13 +7,13 @@ import pytest
 def create_and_login(client, email, login):
     response = client.post(
         "/api/create-user",
-        json={"email": email, "login": login, "password": "password"},
+        json={"email": email, "login": login, "password": "correct horse battery staple"},
     )
     assert response.status_code == 201
 
     response = client.post(
         "/api/login",
-        json={"email": email, "password": "password"},
+        json={"email": email, "password": "correct horse battery staple"},
     )
     assert response.status_code == 200
     return {"Authorization": f"Bearer {response.get_json()['token']}"}
@@ -73,7 +73,7 @@ def test_cannot_register_existing_login(db_client, login):
 
     response = db_client.post(
         "/api/create-user",
-        json={"email": "attacker@test.local", "login": login, "password": "password"},
+        json={"email": "attacker@test.local", "login": login, "password": "correct horse battery staple"},
     )
 
     assert response.status_code == 409
@@ -85,7 +85,7 @@ def test_cannot_register_existing_email(db_client):
 
     response = db_client.post(
         "/api/create-user",
-        json={"email": "owner@test.local", "login": "mallory", "password": "password"},
+        json={"email": "owner@test.local", "login": "mallory", "password": "correct horse battery staple"},
     )
 
     assert response.status_code == 409

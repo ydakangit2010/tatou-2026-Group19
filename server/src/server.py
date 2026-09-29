@@ -290,6 +290,8 @@ def create_app():
         password = payload.get("password") or ""
         if not email or not login or not password:
             return jsonify({"error": "email, login, and password are required"}), 400
+        if not 15 <= len(password) <= 128:
+            return jsonify({"error": "password must be 15 to 128 characters long"}), 400
 
         hpw = generate_password_hash(password)
 
