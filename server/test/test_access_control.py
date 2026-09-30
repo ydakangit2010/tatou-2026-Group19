@@ -402,3 +402,116 @@ def test_authenticated_owner_can_delete_own_document(monkeypatch):
 
     assert response.status_code == 200
     assert response.get_json()["deleted"] is True
+
+class StatefulDeleteConnection:
+    def __init__(self, state):
+        self.state = state
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def execute(self, statement, params=None):
+        sql = str(statement)
+        params = params or {}
+
+        # Simulate document 123 owned by user 10.
+        if "SELECT" in sql and "FROM Documents" in sql:
+            if not self.state["document_exists"]:
+                return FakeResult(None)
+
+            if "ownerid" in sql and int(params.get("uid", -1)) != 10:
+                return FakeResult(None)
+
+            return FakeResult(
+                SimpleNamespace(
+                    id=123,
+		    name="test.pdf",
+                    path=self.state["document_path"],
+                    sha256_hex="00",
+                    link="test.pdf",
+                )
+            )
+
+        # No watermark versions are needed for this test.
+        if "SELECT path FROM Versions" in sql:
+            return SimpleNamespace(all=lambda: [])
+
+        # Record the actual persistent state change.
+        if "DELETE FROM Documents" in sql:
+            self.state["document_exists"] = False
+            return FakeResult(None)
+
+        return FakeResult(None)
+
+
+class StatefulDeleteEngine:
+    def __init__(self, document_path):
+        self.state = {
+            "document_exists": True,
+            "document_path": str(document_path),
+        }
+
+    def connect(self):
+        return StatefulDeleteConnection(self.state)
+
+    def begin(self):
+        return StatefulDeleteConnection(self.state)
+
+
+def test_non_owner_delete_does_not_change_document_state(monkeypatch, tmp_path):
+    storage_dir = tmp_path
+    document_path = storage_dir / "files" / "owner" / "test.pdf"
+    document_path.parent.mkdir(parents=True)
+    document_path.write_bytes(b"%PDF-1.4\n% test\n")
+
+    engine = StatefulDeleteEngine(document_path)
+
+    monkeypatch.setitem(app.config, "_ENGINE", engine)
+    monkeypatch.setitem(app.config, "STORAGE_DIR", storage_dir)
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    attacker_token = serializer.dumps(
+        {
+            "uid": 20,
+            "login": "other_user",
+            "email": "other@test.local",
+        }
+    )
+
+    owner_token = serializer.dumps(
+        {
+            "uid": 10,
+            "login": "owner_user",
+            "email": "owner@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    # 1. Non-owner tries to delete the owner's document.
+    attacker_response = client.delete(
+        "/api/delete-document/123",
+        headers={"Authorization": f"Bearer {attacker_token}"},
+    )
+
+    assert attacker_response.status_code == 404
+    assert attacker_response.get_json() == {"error": "document not found"}
+
+    # 2. Verify that the forbidden operation caused no state change.
+    assert engine.state["document_exists"] is True
+    assert document_path.exists()
+
+    # 3. Owner can still retrieve the document after the failed attack.
+    owner_get_response = client.get(
+        "/api/get-document/123",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert owner_get_response.status_code == 200
