@@ -515,3 +515,41 @@ def test_non_owner_delete_does_not_change_document_state(monkeypatch, tmp_path):
     )
 
     assert owner_get_response.status_code == 200
+
+def test_owner_delete_changes_document_state(monkeypatch, tmp_path):
+    storage_dir = tmp_path
+    document_path = storage_dir / "files" / "owner" / "test.pdf"
+    document_path.parent.mkdir(parents=True)
+    document_path.write_bytes(b"%PDF-1.4\n% test\n")
+
+    engine = StatefulDeleteEngine(document_path)
+
+    monkeypatch.setitem(app.config, "_ENGINE", engine)
+    monkeypatch.setitem(app.config, "STORAGE_DIR", storage_dir)
+
+    serializer = URLSafeTimedSerializer(
+        app.config["SECRET_KEY"],
+        salt="tatou-auth",
+    )
+
+    owner_token = serializer.dumps(
+        {
+            "uid": 10,
+            "login": "owner_user",
+            "email": "owner@test.local",
+        }
+    )
+
+    client = app.test_client()
+
+    response = client.delete(
+        "/api/delete-document/123",
+        headers={"Authorization": f"Bearer {owner_token}"},
+    )
+
+    assert response.status_code == 200
+    assert response.get_json()["deleted"] is True
+
+    # Verify the authorised delete actually changed state.
+    assert engine.state["document_exists"] is False
+    assert not document_path.exists()
