@@ -186,3 +186,34 @@ All 3 fuzzing tests and 17 existing tests passed.
 The fixes were tested in the working source code.
 They were not verified on the deployed server.
 ```
+
+
+## 2026-10-13 – Flag 2 captured again
+
+### What happened
+
+The teacher informed us that our Flag 2 had been captured again and provided a new value.
+
+### Investigation
+
+We reviewed the current server configuration and the previous security fixes.
+
+We checked application privileges, sensitive file protection, file-related API routes, RMAP, and the previously disabled plugin functionality.
+
+We could not confirm the exact method used to capture the flag.
+
+### Actions taken
+
+- Rotated Flag 2.
+- Improved the way Flag 2 is protected inside the server.
+- Reduced unnecessary exposure of the flag during application startup.
+- Rebuilt and restarted the service.
+- Verified that the application still works correctly.
+- Ran the automated tests successfully: 46 passed, 17 skipped.
+- Checked that the RMAP endpoints still respond correctly.
+
+### Result
+
+Additional protection was added for Flag 2 while keeping the required Tatou functionality working.
+
+The exact capture method could not be confirmed.
