@@ -615,4 +615,6 @@ should decrypt to:
 **Specification**
  * `get-version/<result>` SHOULD point to a watermarked version of a PDF specific to the group authenticated by the public key of the client.
  * The watermarked version MUST be created and recorded in the database before the link is returned.
+ * If the version cannot be recorded, the request MUST fail and the new file MUST be removed; no link is returned.
+ * A replayed message 2 MUST NOT return the link again and MUST NOT change or remove the copy already issued for that link. It MUST be answered with `409 {"error": "link already issued"}`.
  * The payload is a gpg encrypted JSON presented as ASCII armored base64, without any GPG headers.

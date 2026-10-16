@@ -269,8 +269,11 @@ def create_app():
             except ValueError:
                 raise RuntimeError("RMAP destination path is invalid")
 
-            with dest_path.open("wb") as f:
-                f.write(wm_bytes)
+            try:
+                with dest_path.open("xb") as f:
+                    f.write(wm_bytes)
+            except FileExistsError:
+                return jsonify({"error": "link already issued"}), 409
 
             try:
                 with get_engine().begin() as conn:
