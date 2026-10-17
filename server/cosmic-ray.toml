@@ -1,0 +1,8 @@
+[cosmic-ray]
+module-path = "src/server.py"
+timeout = 60.0
+excluded-modules = []
+test-command = "python -m pytest -x -q -p no:cacheprovider -W ignore --hypothesis-seed=0"
+
+[cosmic-ray.distributor]
+name = "local"

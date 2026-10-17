@@ -19,6 +19,9 @@ dev = [
     "pytest>=7.0.0",
     "hypothesis>=6.168.5"
 ]
+mutation = [
+    "cosmic-ray==8.7.0"
+]
 
 [tool.pytest.ini_options]
 addopts = "-q"
