@@ -126,3 +126,36 @@ SECRET_KEY=local-test-only-key .venv/bin/python -m pytest \
 
 These are focused tests, not the full test suite. The database-dependent
 tests require an isolated test database.
+
+### Mutation testing
+
+We use [Cosmic Ray](https://github.com/sixty-north/cosmic-ray) to check whether the
+tests notice small faults in `server/src/server.py`. It changes the code one mutant at
+a time (for example `or` → `and`, `401` → `402`, a removed route decorator) and runs the
+test suite. A mutant that no test notices "survives" and points to a missing check.
+The configuration is `server/cosmic-ray.toml`.
+
+Start a throwaway MariaDB for the database tests (the same image CI uses):
+
+```bash
+docker run -d --name tatou-test-db -e MARIADB_ROOT_PASSWORD=test-root \
+  -p 127.0.0.1:3307:3306 mariadb:11.4
+```
+
+Then, from the `server` directory:
+
+```bash
+python -m pip install -e ".[dev,mutation]"
+export SECRET_KEY=local-test-only-key TEST_DB_REQUIRED=1
+cosmic-ray init cosmic-ray.toml session.sqlite
+cosmic-ray baseline cosmic-ray.toml
+cosmic-ray exec cosmic-ray.toml session.sqlite
+cr-report session.sqlite
+cr-html session.sqlite > mutation-report.html
+```
+
+A single-process run of all ~860 mutants takes a few hours.
+
+Cosmic Ray does not mutate string literals, so it cannot change the SQL ownership
+filters (`ownerid = :uid`). Those are covered by the real-database tests in
+`server/test/test_access_control_db.py`.
