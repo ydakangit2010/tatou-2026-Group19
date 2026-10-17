@@ -3,6 +3,7 @@ from __future__ import annotations
 import importlib
 import inspect
 from pathlib import Path
+import pymupdf
 import pytest
 
 
@@ -27,11 +28,11 @@ if not CASES:
 def sample_pdf_path(tmp_path_factory) -> Path:
     """Minimal but recognizable PDF bytes."""
     pdf = tmp_path_factory.mktemp("pdfs") / "sample.pdf"
-    pdf.write_bytes(
-        b"%PDF-1.4\n"
-        b"1 0 obj\n<< /Type /Catalog >>\nendobj\n"
-        b"%%EOF\n"
-    )
+    doc = pymupdf.open()
+    page = doc.new_page(width=595, height=842)
+    page.insert_text((72, 100), "Tatou sample document")
+    doc.save(pdf)
+    doc.close()
     return pdf
 
 @pytest.fixture(scope="session")

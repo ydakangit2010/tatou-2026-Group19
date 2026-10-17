@@ -116,3 +116,104 @@ Both captured flags were reported to the teacher using the required subject
 This exercise also helped us identify security improvements that we applied to our own Tatou server.
 
 
+## 2026-09-24 – Access-control regression test
+
+### What happened
+We reviewed the document deletion endpoint to check that one user could not delete another user's document.
+
+### Actions taken
+- Added an automated test where a non-owner tries to delete a document.
+- Checked that the server returns HTTP 404 with a document-not-found error.
+- Used a fake database to simulate document ownership.
+
+### Result
+The test passed and gave us a way to check that unauthorized deletion remains blocked.
+
+## 2026-09-29 – Access-control testing improvements
+
+### What happened
+We improved our tests for document ownership. During this work, we also found that `list-versions` used login names instead of numeric user IDs for ownership checks.
+
+### Actions taken
+- Added tests covering eight document-related API endpoints.
+- Used fake database tests and some MariaDB integration tests.
+- Fixed the `list-versions` ownership check to use the user ID.
+- Updated file storage to use numeric user IDs instead of login names.
+- Added a positive-control test to check that the document owner can still delete their document.
+
+### Result
+The new tests gave us better coverage of document access. They also helped us find and fix an ownership problem.
+
+## 2026-09-30 – Document deletion state verification
+
+### What happened
+We wanted to check whether the document was actually protected after an unauthorized deletion request, instead of only checking the HTTP response.
+
+### Actions taken
+- Added a test to check that a non-owner receives HTTP 404 and the document remains available.
+- Checked that the owner can still retrieve the document after the failed deletion.
+- Added another test to check that an authorized deletion removes the document and its temporary file.
+
+### Result
+The tests passed. They showed that unauthorized deletion did not change the simulated document state, while authorized deletion removed it.
+
+These tests used a fake database and temporary file storage, not the production database.
+
+
+
+## 2026-10-11 - Fuzzing and input-validation fixes
+
+### What happened
+
+We used Hypothesis to test the create-watermark API with
+different JSON input values.
+
+We found two problems:
+- An invalid intended_for value caused a TypeError.
+- An invalid position value was accepted instead of being rejected.
+
+### Actions taken
+
+- Added type checks for intended_for and position.
+- Added three Hypothesis fuzzing tests.
+- Used a fake database and temporary files for safety.
+- Ran the fuzzing tests and selected existing tests again.
+
+### Result
+
+All 3 fuzzing tests and 17 existing tests passed.
+
+The fixes were tested in the working source code.
+They were not verified on the deployed server.
+```
+
+
+## 2026-10-13 – Flag 2 captured again
+
+### What happened
+
+The teacher informed us that our Flag 2 had been captured again and provided a new value.
+
+### Investigation
+
+We reviewed the current server configuration and the previous security fixes.
+
+We checked application privileges, sensitive file protection, file-related API routes, RMAP, and the previously disabled plugin functionality.
+
+We could not confirm the exact method used to capture the flag.
+
+### Actions taken
+
+- Rotated Flag 2.
+- Improved the way Flag 2 is protected inside the server.
+- Reduced unnecessary exposure of the flag during application startup.
+- Rebuilt and restarted the service.
+- Verified that the application still works correctly.
+- Ran the automated tests successfully: 46 passed, 17 skipped.
+- Checked that the RMAP endpoints still respond correctly.
+
+### Result
+
+Additional protection was added for Flag 2 while keeping the required Tatou functionality working.
+
+The exact capture method could not be confirmed.

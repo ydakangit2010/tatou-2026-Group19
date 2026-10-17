@@ -10,13 +10,18 @@ dependencies = [
 	"PyMySQL==1.1.2",
 	"SQLAlchemy==2.0.43",
 	"dill==0.4.0",
-	"rmap @ git+https://github.com/nharrand/RMAP.git@v1.0.2",
+	"rmap @ https://github.com/nharrand/RMAP/releases/download/v2.0.0/rmap-2.0.0-py3-none-any.whl",
 	"standard-imghdr==3.13.0"
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0"
+    "pytest>=7.0.0",
+    "pytest-cov>=7.0",
+    "hypothesis>=6.168.5"
+]
+mutation = [
+    "cosmic-ray==8.7.0"
 ]
 
 [tool.pytest.ini_options]

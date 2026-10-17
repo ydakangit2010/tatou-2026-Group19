@@ -269,8 +269,11 @@ def create_app():
             except ValueError:
                 raise RuntimeError("RMAP destination path is invalid")
 
-            with dest_path.open("wb") as f:
-                f.write(wm_bytes)
+            try:
+                with dest_path.open("xb") as f:
+                    f.write(wm_bytes)
+            except FileExistsError:
+                return jsonify({"error": "link already issued"}), 409
 
             try:
                 with get_engine().begin() as conn:
@@ -774,7 +777,10 @@ def create_app():
         # allow a couple of aliases for convenience
         method = payload.get("method")
         intended_for = payload.get("intended_for")
-        position = payload.get("position") or None
+        position = payload.get("position")
+        if position is not None and not isinstance(position, str):
+            return jsonify({"error": "position must be a string"}), 400
+        position = position or None
         secret = payload.get("secret")
         key = payload.get("key")
 
@@ -783,7 +789,7 @@ def create_app():
             doc_id = int(doc_id)
         except (TypeError, ValueError):
             return jsonify({"error": "document_id (int) is required"}), 400
-        if not method or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
+        if not method or not isinstance(intended_for,str) or not intended_for or not isinstance(secret, str) or not isinstance(key, str):
             return jsonify({"error": "method, intended_for, secret, and key are required"}), 400
 
         # lookup the document; enforce ownership
